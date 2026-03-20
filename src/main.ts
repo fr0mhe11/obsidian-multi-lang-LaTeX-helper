@@ -450,6 +450,9 @@ export default class Fcitx5LatexPlugin extends Plugin {
 // ==========================================
 // 설정 UI 탭 클래스
 // ==========================================
+// ==========================================
+// 설정 UI 탭 클래스 (영문판 - 글로벌 스토어 심사용)
+// ==========================================
 class Fcitx5LatexSettingTab extends PluginSettingTab {
     plugin: Fcitx5LatexPlugin;
 
@@ -461,14 +464,14 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl('h2', { text: 'LaTeX 자동 한영 전환 설정' });
+        containerEl.createEl('h2', { text: 'LaTeX Auto IME Switcher Settings' });
 
         new Setting(containerEl)
-            .setName('수식 인식 엔진 (Engine)')
-            .setDesc('수식을 판별하는 방식을 선택합니다. (Syntax Tree 권장)')
+            .setName('Math Recognition Engine')
+            .setDesc('Select how to detect math environments. (Syntax Tree recommended)')
             .addDropdown(dropdown => dropdown
-                .addOption('syntaxTree', '구문 트리 (Syntax Tree - 정확함)')
-                .addOption('regex', '정규식 (Regex - 빠름)')
+                .addOption('syntaxTree', 'Syntax Tree (Accurate)')
+                .addOption('regex', 'Regex (Fast)')
                 .setValue(this.plugin.settings.engine)
                 .onChange(async (value: 'regex' | 'syntaxTree') => {
                     this.plugin.settings.engine = value;
@@ -476,8 +479,8 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('$ 기호 자동 완성')
-            .setDesc('$ 입력 시 $$로 자동 완성하고 커서를 옮깁니다.')
+            .setName('Auto-complete Dollar Sign')
+            .setDesc('Automatically complete $ to $$ and move cursor inside.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.autoCompleteDollar)
                 .onChange(async (value) => {
@@ -486,8 +489,8 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('엄격한 경계선 판별 (Strict Boundary)')
-            .setDesc('옵시디안 파서가 $$를 인라인 수식으로 헷갈려서 발생하는 경계선 팽창 버그를 방지합니다. 수식 바로 밖에서 한글이 잘 안 쳐진다면 켜주세요.')
+            .setName('Strict Boundary Detection')
+            .setDesc('Prevents boundary expansion bugs caused by Obsidian\'s internal parser. Enable if Korean input fails just outside math blocks.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.strictBoundary)
                 .onChange(async (value) => {
@@ -496,8 +499,8 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('정규식 탐색 범위 (Regex Range)')
-            .setDesc('정규식 엔진 사용 시 커서 앞뒤로 몇 글자까지 읽어와서 수식을 찾을지 설정합니다. (기본값: 3500)')
+            .setName('Regex Search Range')
+            .setDesc('If using Regex engine, set how many characters around the cursor to read. (Default: 3500)')
             .addText(text => text
                 .setPlaceholder('3500')
                 .setValue(String(this.plugin.settings.regexRange))
@@ -509,11 +512,11 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
                     }
                 }));
 
-        containerEl.createEl('h3', { text: '운영체제별 전환 명령어 설정' });
+        containerEl.createEl('h3', { text: 'OS-specific IME Commands' });
 
         new Setting(containerEl)
-            .setName('리눅스 영문 전환 명령어')
-            .setDesc('수식 진입 시 실행될 명령어입니다. fcitx4 사용자는 fcitx-remote -c 등을 입력하세요.')
+            .setName('Linux English Command')
+            .setDesc('Command executed when entering a math block (e.g., fcitx5-remote -s keyboard-us).')
             .addText(text => text
                 .setPlaceholder('fcitx5-remote -s keyboard-us')
                 .setValue(this.plugin.settings.linuxEngCmd)
@@ -523,8 +526,8 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('리눅스 한글 전환 명령어')
-            .setDesc('수식 탈출 시 실행될 명령어입니다. fcitx4 사용자는 fcitx-remote -o 등을 입력하세요.')
+            .setName('Linux Local Language Command')
+            .setDesc('Command executed when exiting a math block (e.g., fcitx5-remote -s hangul).')
             .addText(text => text
                 .setPlaceholder('fcitx5-remote -s hangul')
                 .setValue(this.plugin.settings.linuxKorCmd)
@@ -534,8 +537,8 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('윈도우 한/영 전환 키 코드 (Hex)')
-            .setDesc('Windows에서 한/영 토글에 사용할 가상 키보드 코드입니다. 기본 우측 Alt(한/영)는 0x15 입니다.')
+            .setName('Windows IME Toggle Key Code (Legacy)')
+            .setDesc('Virtual key code for IME toggle. Note: Windows now uses native imm32.dll API by default for zero-delay switching, making this fallback rarely used.')
             .addText(text => text
                 .setPlaceholder('0x15')
                 .setValue(this.plugin.settings.windowsKeyCode)
