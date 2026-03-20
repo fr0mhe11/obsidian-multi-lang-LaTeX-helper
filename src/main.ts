@@ -205,7 +205,7 @@ export default class Fcitx5LatexPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 
-    // 🚀 백그라운드 파워쉘 실행 함수
+// 🚀 백그라운드 파워쉘 실행 함수 (.exe 방식의 강제 상태 고정 API 적용)
     private initPowerShell() {
         const setupScript = `
             Add-Type -TypeDefinition '
@@ -213,14 +213,30 @@ export default class Fcitx5LatexPlugin extends Plugin {
             using System.Runtime.InteropServices;
             public class IME {
                 [DllImport("user32.dll")]
-                public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+                public static extern IntPtr GetForegroundWindow();
+                [DllImport("imm32.dll")]
+                public static extern IntPtr ImmGetDefaultIMEWnd(IntPtr hWnd);
+                [DllImport("user32.dll", CharSet = CharSet.Auto)]
+                public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
+
+                public static void SetEnglish() {
+                    IntPtr hwnd = GetForegroundWindow();
+                    IntPtr hIme = ImmGetDefaultIMEWnd(hwnd);
+                    // 0x0283 = WM_IME_CONTROL, 0x0002 = IMC_SETCONVERSIONMODE, 0 = 영문
+                    SendMessage(hIme, 0x0283, (IntPtr)0x0002, (IntPtr)0); 
+                }
+
+                public static void SetKorean() {
+                    IntPtr hwnd = GetForegroundWindow();
+                    IntPtr hIme = ImmGetDefaultIMEWnd(hwnd);
+                    // 1 = 한글
+                    SendMessage(hIme, 0x0283, (IntPtr)0x0002, (IntPtr)1); 
+                }
             }';
         `;
         
-        // 파워쉘을 대화형(Interactive) 스트림 모드로 켭니다.
         this.psProcess = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '-']);
         
-        // 켜지자마자 C# 클래스를 메모리에 로드해 둡니다.
         if (this.psProcess.stdin) {
             this.psProcess.stdin.write(setupScript + '\n');
         }
@@ -392,38 +408,42 @@ export default class Fcitx5LatexPlugin extends Plugin {
         this.switchToEnglish();
     }
 
-    // 🚀 딜레이 없는 즉각적인 윈도우 한/영 토글
-    private triggerWindowsImeToggle() {
-        const keyCode = this.settings.windowsKeyCode || "0x15";
-        
+   // 🚀 꼬임(Desync)이 절대 발생하지 않는 윈도우 강제 한영 전환
+    private forceWindowsIme(isKorean: boolean) {
         if (this.psProcess && this.psProcess.stdin) {
-            // 이미 켜져있는 파워쉘에 명령어만 던짐 (0.01초 컷)
-            this.psProcess.stdin.write(`[IME]::keybd_event(${keyCode}, 0, 0, [UIntPtr]::Zero); [IME]::keybd_event(${keyCode}, 0, 2, [UIntPtr]::Zero);\n`);
+            // 파워쉘 파이프라인에 강제 전환 명령 전송 (0.01초 컷)
+            const cmd = isKorean ? '[IME]::SetKorean();\n' : '[IME]::SetEnglish();\n';
+            this.psProcess.stdin.write(cmd);
         } else {
-            // 혹시라도 프로세스가 죽었을 때를 대비한 낡은 방식(Fallback)
+            // 프로세스가 죽었을 때를 대비한 Fallback
             const psCommand = `
                 Add-Type -TypeDefinition '
                 using System;
                 using System.Runtime.InteropServices;
                 public class IME {
                     [DllImport("user32.dll")]
-                    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+                    public static extern IntPtr GetForegroundWindow();
+                    [DllImport("imm32.dll")]
+                    public static extern IntPtr ImmGetDefaultIMEWnd(IntPtr hWnd);
+                    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+                    public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
                 }';
-                [IME]::keybd_event(${keyCode}, 0, 0, [UIntPtr]::Zero);
-                [IME]::keybd_event(${keyCode}, 0, 2, [UIntPtr]::Zero);
+                $hwnd = [IME]::GetForegroundWindow();
+                $hIme = [IME]::ImmGetDefaultIMEWnd($hwnd);
+                [IME]::SendMessage($hIme, 0x0283, 2, ${isKorean ? 1 : 0});
             `.replace(/\n/g, ' ');
             exec(`powershell -windowstyle hidden -Command "${psCommand}"`);
         }
     }
 
-    private switchToEnglish() {
+ private switchToEnglish() {
         if (isLinux) exec(this.settings.linuxEngCmd, () => {});
-        else if (isWin) this.triggerWindowsImeToggle();
+        else if (isWin) this.forceWindowsIme(false); // 무조건 영어로 꽂기
     }
 
-    private switchToKorean() {
+  private switchToKorean() {
         if (isLinux) exec(this.settings.linuxKorCmd, () => {});
-        else if (isWin) this.triggerWindowsImeToggle();
+        else if (isWin) this.forceWindowsIme(true);  // 무조건 한글로 꽂기
     }
 }
 

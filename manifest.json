@@ -1,7 +1,7 @@
 {
 	"id": "multiLangLaTeXHelper",
 	"name": "multi Lang LaTeX Helper",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"minAppVersion": "0.15.0",
 	"description": "Streamlines your LaTeX workflow",
 	"author": "fr0mhe11",
