@@ -18,7 +18,7 @@ interface Fcitx5LatexSettings {
 }
 
 const DEFAULT_SETTINGS: Fcitx5LatexSettings = {
-    engine: 'syntaxTree',
+    engine: 'regex',
     autoCompleteDollar: true,
     strictBoundary: true,
     regexRange: 3500,
@@ -255,7 +255,21 @@ export default class Fcitx5LatexPlugin extends Plugin {
         }
     }
 
-    private checkMathEnvironment(state: EditorState, pos: number): { isMath: boolean, inTextCmd: boolean } {
+ private checkMathEnvironment(state: EditorState, pos: number): { isMath: boolean, inTextCmd: boolean } {
+        // 🚀 핵심 픽스 3: "수식 기호 바로 앞의 백슬래시(\)" 엣지 케이스 완벽 방어
+        // 사용자가 $$ 또는 $ 안에서 \를 치는 정확한 순간, 텍스트가 \$로 인식되어
+        // 옵시디안 내부 파서(Syntax Tree)와 정규식이 수식을 탈출했다고 착각하는 현상(Desync)을 막습니다.
+        
+        const docText = state.doc.toString();
+        const prevChar = docText.charAt(pos - 1);
+        const nextChar = docText.charAt(pos);
+
+        // 치는 순간(커서가 \와 $ 사이일 때)은 파서의 오류를 무시하고 무조건 수식 모드로 강제 유지
+        if (this.isCurrentlyMath && prevChar === '\\' && nextChar === '$') {
+            return { isMath: true, inTextCmd: false };
+        }
+
+        // --- 여기서부터 기존 로직 ---
         if (this.settings.engine === 'syntaxTree') {
             return this.checkWithSyntaxTree(state, pos);
         } else {
