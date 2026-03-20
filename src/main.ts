@@ -8,20 +8,20 @@ const isWin = process.platform === 'win32';
 const isLinux = process.platform === 'linux';
 
 interface Fcitx5LatexSettings {
-    engine: 'regex' | 'syntaxTree';
     autoCompleteDollar: boolean;
     strictBoundary: boolean;
     regexRange: number;
+   inlineScanRange: number;
     linuxEngCmd: string;
     linuxKorCmd: string;
     windowsKeyCode: string;
 }
 
 const DEFAULT_SETTINGS: Fcitx5LatexSettings = {
-    engine: 'regex',
     autoCompleteDollar: true,
     strictBoundary: true,
     regexRange: 3500,
+    inlineScanRange: 800,
     linuxEngCmd: 'fcitx5-remote -s keyboard-us',
     linuxKorCmd: 'fcitx5-remote -s hangul',
     windowsKeyCode: '0x15'
@@ -44,7 +44,7 @@ export default class Fcitx5LatexPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
-        console.log(`🚀 LaTeX 플러그인 로드됨 (엔진: ${this.settings.engine})`);
+        console.log("🚀 LaTeX 플러그인 로드됨 (하이브리드 파서 적용)");
 
         this.addSettingTab(new Fcitx5LatexSettingTab(this.app, this));
 
@@ -57,58 +57,7 @@ export default class Fcitx5LatexPlugin extends Plugin {
             }
         });
 
-        const koreanFilter = EditorState.transactionFilter.of((tr) => {
-            if (!tr.docChanged || (this.lastMathEnterTime > 0 && Date.now() - this.lastMathEnterTime > 1000)) return tr;
-            
-            let hasKorean = false;
-            tr.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
-                if (/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(inserted.toString())) hasKorean = true;
-            });
-            if (!hasKorean) return tr;
-
-            let isMath = false;
-            let inMathTextCmd = false;
-
-            tr.changes.iterChanges((fromA) => {
-                const mathInfo = this.checkMathEnvironment(tr.startState, fromA);
-                if (mathInfo.isMath) {
-                    isMath = true;
-                    inMathTextCmd = mathInfo.inTextCmd;
-                }
-            });
-
-            if (!isMath || inMathTextCmd) return tr;
-
-            const newChanges: any[] = [];
-            tr.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
-                const insertedStr = inserted.toString();
-                let engResult = "";
-
-                for (let i = 0; i < insertedStr.length; i++) {
-                    const char = insertedStr.charAt(i);
-                    let code = char.charCodeAt(0);
-
-                    if (code >= 0xAC00 && code <= 0xD7A3) { 
-                        code -= 0xAC00;
-                        const jong = code % 28;
-                        const jung = Math.floor((code - jong) / 28) % 21;
-                        const cho = Math.floor(Math.floor((code - jong) / 28) / 21);
-
-                        const choMap = ["r", "R", "s", "e", "E", "f", "a", "q", "Q", "t", "T", "d", "w", "W", "c", "z", "x", "v", "g"];
-                        const jungMap = ["k", "o", "i", "O", "j", "p", "u", "P", "h", "hk", "ho", "hl", "y", "n", "nj", "np", "nl", "b", "m", "ml", "l"];
-                        const jongMap = ["", "r", "R", "rt", "s", "sw", "sg", "e", "f", "fr", "fa", "fq", "ft", "fx", "fv", "fg", "a", "q", "qt", "t", "T", "d", "w", "c", "z", "x", "v", "g"];
-                        
-                        engResult += (choMap[cho] || "") + (jungMap[jung] || "") + (jongMap[jong] || "");
-                    } else {
-                        engResult += singleJamoMap[char] || char;
-                    }
-                }
-                newChanges.push({ from: fromA, to: toA, insert: engResult });
-            });
-
-            return { changes: newChanges, selection: tr.newSelection, effects: tr.effects };
-        });
-
+       
         const customKeymap = keymap.of([
             {
                 key: "$",
@@ -129,7 +78,6 @@ export default class Fcitx5LatexPlugin extends Plugin {
                     const prevChar = state.sliceDoc(from - 1, from);
                     const nextChar = state.sliceDoc(from, from + 1);
 
-                    // 백슬래시 다음의 $는 무시합니다.
                     if (prevChar === "\\") return false;
 
                     if (nextChar === "$") {
@@ -153,7 +101,7 @@ export default class Fcitx5LatexPlugin extends Plugin {
                     return true;
                 }
             },
-            {
+          {
                 key: "Backspace",
                 run: (view) => {
                     if (!this.settings.autoCompleteDollar) return false;
@@ -165,12 +113,17 @@ export default class Fcitx5LatexPlugin extends Plugin {
                         const prevChar = state.sliceDoc(from - 1, from);
                         const nextChar = state.sliceDoc(from, from + 1);
 
+                        // 커서 양옆에 $ $ 가 있어서 동시에 지워지는 상황
                         if (prevChar === "$" && nextChar === "$") {
                             view.dispatch({
                                 changes: { from: from - 1, to: from + 1, insert: "" },
                                 selection: { anchor: from - 1 } 
                             });
-                            this.setMathModeActive();
+                            
+                            // 🚀 수정된 부분: 수식이 완전히 지워졌으므로 영어 고정이 아니라 한글로 풀어주어야 합니다!
+                            this.isCurrentlyMath = false;
+                            this.switchToKorean();
+                            
                             return true;
                         }
                     }
@@ -179,9 +132,8 @@ export default class Fcitx5LatexPlugin extends Plugin {
             }
         ]);
 
-        this.registerEditorExtension([updateListener, koreanFilter, customKeymap]);
+        this.registerEditorExtension([updateListener, customKeymap]);
 
-        // 🚀 플러그인 켜질 때 윈도우 파워쉘 백그라운드 세팅
         if (isWin) {
             this.initPowerShell();
         }
@@ -189,7 +141,6 @@ export default class Fcitx5LatexPlugin extends Plugin {
 
     onunload() {
         console.log("LaTeX 플러그인 종료됨.");
-        // 🚀 플러그인 꺼질 때 파워쉘 프로세스 정리
         if (this.psProcess) {
             this.psProcess.stdin?.end();
             this.psProcess.kill();
@@ -205,7 +156,6 @@ export default class Fcitx5LatexPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 
-// 🚀 백그라운드 파워쉘 실행 함수 (.exe 방식의 강제 상태 고정 API 적용)
     private initPowerShell() {
         const setupScript = `
             Add-Type -TypeDefinition '
@@ -222,14 +172,12 @@ export default class Fcitx5LatexPlugin extends Plugin {
                 public static void SetEnglish() {
                     IntPtr hwnd = GetForegroundWindow();
                     IntPtr hIme = ImmGetDefaultIMEWnd(hwnd);
-                    // 0x0283 = WM_IME_CONTROL, 0x0002 = IMC_SETCONVERSIONMODE, 0 = 영문
                     SendMessage(hIme, 0x0283, (IntPtr)0x0002, (IntPtr)0); 
                 }
 
                 public static void SetKorean() {
                     IntPtr hwnd = GetForegroundWindow();
                     IntPtr hIme = ImmGetDefaultIMEWnd(hwnd);
-                    // 1 = 한글
                     SendMessage(hIme, 0x0283, (IntPtr)0x0002, (IntPtr)1); 
                 }
             }';
@@ -255,30 +203,51 @@ export default class Fcitx5LatexPlugin extends Plugin {
         }
     }
 
- private checkMathEnvironment(state: EditorState, pos: number): { isMath: boolean, inTextCmd: boolean } {
-        // 🚀 핵심 픽스 3: "수식 기호 바로 앞의 백슬래시(\)" 엣지 케이스 완벽 방어
-        // 사용자가 $$ 또는 $ 안에서 \를 치는 정확한 순간, 텍스트가 \$로 인식되어
-        // 옵시디안 내부 파서(Syntax Tree)와 정규식이 수식을 탈출했다고 착각하는 현상(Desync)을 막습니다.
-        
+    private checkMathEnvironment(state: EditorState, pos: number): { isMath: boolean, inTextCmd: boolean } {
         const docText = state.doc.toString();
         const prevChar = docText.charAt(pos - 1);
         const nextChar = docText.charAt(pos);
 
-        // 치는 순간(커서가 \와 $ 사이일 때)은 파서의 오류를 무시하고 무조건 수식 모드로 강제 유지
+        // 1. 타이핑 엇박자 완벽 방어 (\ 칠 때 튕기는 현상 즉시 차단)
         if (this.isCurrentlyMath && prevChar === '\\' && nextChar === '$') {
             return { isMath: true, inTextCmd: false };
         }
 
-        // --- 여기서부터 기존 로직 ---
-        if (this.settings.engine === 'syntaxTree') {
-            return this.checkWithSyntaxTree(state, pos);
-        } else {
-            return this.checkWithRegex(state, pos);
-        }
-    }
+        // 🚀 2. 스캔 범위 설정 (메쓰블록과 인라인 정규식이 공유하는 레인지)
+        const scanRange = this.settings.regexRange || 3500; 
+        const startPos = Math.max(0, pos - scanRange);
+        
+        // 인라인 정규식은 닫는 기호도 찾아야 하므로 커서 뒤쪽으로도 동일하게 범위를 잡습니다.
+        const endPos = Math.min(state.doc.length, pos + scanRange);
 
-    // 1. 구문 트리 (Syntax Tree) 엔진 - 거짓말 탐지기 탑재
-    private checkWithSyntaxTree(state: EditorState, pos: number): { isMath: boolean, inTextCmd: boolean } {
+        // --- 메쓰블록($$) 홀짝 카운터 (기존 로직 완벽 유지) ---
+const blockScanRange = this.settings.regexRange || 10000; 
+        const blockStartPos = Math.max(0, pos - blockScanRange);        
+
+const textToCursor = state.doc.sliceString(startPos, pos);
+        const textWithoutCode = textToCursor.replace(/```[\s\S]*?(```|$)/g, '').replace(/`[^`\n]*?`/g, '');
+        
+        let blockMathCount = 0;
+        let lastDollarIdx = -1;
+        let i = 0;
+        while (i < textWithoutCode.length) {
+            if (textWithoutCode[i] === '\\') { i += 2; continue; }
+            if (textWithoutCode[i] === '$' && textWithoutCode[i+1] === '$') {
+                blockMathCount++;
+                lastDollarIdx = i;
+                i += 2;
+                continue;
+            }
+            i++;
+        }
+
+        if (blockMathCount % 2 === 1) {
+            const textAfterLastDollar = textWithoutCode.slice(lastDollarIdx);
+            const inTextCmd = !!textAfterLastDollar.match(/\\(text|mathrm|textkr)\{([^}]*)$/);
+            return { isMath: true, inTextCmd };
+        }
+
+        // --- 3. Syntax Tree 판별 (옵시디안 코어 파서) ---
         const tree = syntaxTree(state);
         const leftNode = tree.resolveInner(pos, -1);
         const rightNode = tree.resolveInner(pos, 1);
@@ -293,15 +262,12 @@ export default class Fcitx5LatexPlugin extends Plugin {
         let referenceNode = null;
 
         if (this.settings.strictBoundary) {
-            if (isLeftMath && !isRightMath && leftName.includes("formatting-math-end")) {
-                return { isMath: false, inTextCmd: false };
-            }
-            if (!isLeftMath && isRightMath && rightName.includes("formatting-math-begin")) {
-                return { isMath: false, inTextCmd: false };
-            }
-            const prevChar = state.doc.sliceString(pos - 1, pos);
-            const nextChar = state.doc.sliceString(pos, pos + 1);
-            if (prevChar === '$' && nextChar === '$') {
+            if (isLeftMath && !isRightMath && leftName.includes("formatting-math-end")) return { isMath: false, inTextCmd: false };
+            if (!isLeftMath && isRightMath && rightName.includes("formatting-math-begin")) return { isMath: false, inTextCmd: false };
+            
+            const pChar = state.doc.sliceString(pos - 1, pos);
+            const nChar = state.doc.sliceString(pos, pos + 1);
+            if (pChar === '$' && nChar === '$') {
                 isMath = true;
                 referenceNode = leftNode;
             } else if (isLeftMath || isRightMath) {
@@ -321,23 +287,14 @@ export default class Fcitx5LatexPlugin extends Plugin {
                 topMathNode = topMathNode.parent;
             }
 
-            // 🚀 핵심 픽스 1: 옵시디안 파서의 거짓말 탐지기
-            // 파서가 \$ 를 수식이라고 거짓말 쳐도, 원시 텍스트를 검증해서 쳐냅니다.
             const nodeText = state.doc.sliceString(topMathNode.from, topMathNode.to);
-            
             if (nodeText.startsWith('$')) {
                 const charBefore = state.doc.sliceString(topMathNode.from - 1, topMathNode.from);
                 const charBefore2 = state.doc.sliceString(topMathNode.from - 2, topMathNode.from - 1);
-                // 바로 앞이 \ 이고, 그 앞이 \ 가 아니라면 (단순 \$) -> 가짜 수식!
-                if (charBefore === '\\' && charBefore2 !== '\\') {
-                    return { isMath: false, inTextCmd: false };
-                }
+                if (charBefore === '\\' && charBefore2 !== '\\') return { isMath: false, inTextCmd: false };
             } else if (nodeText.startsWith('\\$')) {
                 const charBefore = state.doc.sliceString(topMathNode.from - 1, topMathNode.from);
-                // 파서가 \ 까지 포함해서 덩어리를 잡았을 경우 검증
-                if (charBefore !== '\\') {
-                    return { isMath: false, inTextCmd: false };
-                }
+                if (charBefore !== '\\') return { isMath: false, inTextCmd: false };
             }
 
             const mathTextBeforeCursor = state.doc.sliceString(topMathNode.from, pos);
@@ -345,58 +302,51 @@ export default class Fcitx5LatexPlugin extends Plugin {
             return { isMath: true, inTextCmd };
         }
 
-        return { isMath: false, inTextCmd: false };
-    }
+        // --- 🚀 4. 정규식을 이용한 인라인 수식 힐러 (Regex Inline Healer) ---
+        // Syntax Tree가 $a $ 띄어쓰기 위반으로 포기한 수식을 동일한 scanRange 내에서 정규식으로 구출합니다.
+// --- 🚀 4. 정규식을 이용한 인라인 수식 힐러 (Regex Inline Healer) ---
+        const inlineScanRange = this.settings.inlineScanRange || 500;
+        const inlineStartPos = Math.max(0, pos - inlineScanRange);
+        const inlineEndPos = Math.min(state.doc.length, pos + inlineScanRange);
 
-    // 2. 정규식 (Regex) 엔진 - 홀짝 백슬래시 계산 마스킹 탑재
-    private checkWithRegex(state: EditorState, pos: number): { isMath: boolean, inTextCmd: boolean } {
-        const docText = state.doc.toString();
-        const range = this.settings.regexRange; 
-        const start = Math.max(0, pos - range);
-        const end = Math.min(docText.length, pos + range);
-        const snippet = docText.substring(start, end);
-        const relativePos = pos - start;
+        const textAround = state.doc.sliceString(inlineStartPos, inlineEndPos);
+        const localPos = pos - inlineStartPos;
+        
+        const cleanText = textAround
+            .replace(/```[\s\S]*?(```|$)/g, match => ' '.repeat(match.length))
+            .replace(/`[^`\n]*?`/g, match => ' '.repeat(match.length))
+            .replace(/\$\$/g, '  '); 
 
-        // 🚀 핵심 픽스 2: 진화된 정규식 마스킹 기법
-        // 단순히 \\$를 공백으로 치환하는게 아니라, 홀수 개의 \가 붙었을 때만(진짜 이스케이프 상태) $를 공백으로 지웁니다.
-        // \\$ 처럼 짝수 개(백슬래시 자체가 이스케이프 된 상황)일 때는 $를 그대로 살려둡니다.
-        const maskedSnippet = snippet.replace(/\\+\$/g, (match) => {
-            const backslashCount = match.length - 1;
-            if (backslashCount % 2 === 1) {
-                // $ 기호를 공백(" ")으로 지워서 투명 취급함 (인덱스 길이 유지)
-                return match.slice(0, -1) + " ";
-            }
-            return match;
-        });
-
-        const regex = /(\$\$[\s\S]*?\$\$|\$[^$\n]*\$)/g;
+        // 🚀 수정됨 1: 화폐 단위 방어(?!\s*[0-9]) 완전 삭제!
+        // 숫자로 시작하는 수식($1 + 2$ 등)을 완벽하게 보호합니다.
+        const inlineMathRegex = /(?<!\\)\$((?:(?!\n\n)[^$])+?)(?<!\\)\$/g;
+        
         let match;
-
-        while ((match = regex.exec(maskedSnippet)) !== null) {
-            const index = match.index;
-            const fullMatch = match[0];
-            const matchEnd = index + fullMatch.length;
-
-            let startOffset = 1, endOffset = 1;
-            if (fullMatch.startsWith("$$") && fullMatch.length >= 4) {
-                startOffset = 2;
-                endOffset = 2;
-            }
-
-            if (this.settings.strictBoundary) {
-                if (relativePos > index && relativePos < matchEnd) {
-                    const inTextCmd = !!docText.slice(0, pos).match(/\\(text|mathrm|textkr)\{([^}]*)$/);
-                    return { isMath: true, inTextCmd };
-                }
-            } else {
-                if (relativePos >= index + startOffset && relativePos <= matchEnd - endOffset) {
-                    const inTextCmd = !!docText.slice(0, pos).match(/\\(text|mathrm|textkr)\{([^}]*)$/);
-                    return { isMath: true, inTextCmd };
-                }
+        while ((match = inlineMathRegex.exec(cleanText)) !== null) {
+            if (localPos > match.index && localPos < match.index + match[0].length) {
+                const mathTextBeforeCursor = cleanText.slice(match.index, localPos);
+                const inTextCmd = !!mathTextBeforeCursor.match(/\\(text|mathrm|textkr)\{([^}]*)$/);
+                return { isMath: true, inTextCmd };
             }
         }
+
+        // 🚀 수정됨 2: 타이핑 중인(닫히지 않은) 수식 검사기
+        const textUpToCursor = cleanText.slice(0, localPos);
+        const textWithoutClosedMath = textUpToCursor.replace(inlineMathRegex, match => ' '.repeat(match.length));
+        
+        const unclosedMathRegex = /(?<!\\)\$(?:(?!\n\n)[^$])*$/;
+        const unclosedMatch = unclosedMathRegex.exec(textWithoutClosedMath);
+        
+        if (unclosedMatch) {
+            // 🚀 보너스 수정: 수식을 닫기 전에 \text{} 를 쓸 때도 한글 전환이 되도록 보강
+            const mathTextBeforeCursor = textWithoutClosedMath.slice(unclosedMatch.index, localPos);
+            const inTextCmd = !!mathTextBeforeCursor.match(/\\(text|mathrm|textkr)\{([^}]*)$/);
+            return { isMath: true, inTextCmd };
+        }
+
         return { isMath: false, inTextCmd: false };
     }
+
 
     private checkAndUpdateImeState(state: EditorState) {
         const pos = state.selection.main.head;
@@ -422,14 +372,11 @@ export default class Fcitx5LatexPlugin extends Plugin {
         this.switchToEnglish();
     }
 
-   // 🚀 꼬임(Desync)이 절대 발생하지 않는 윈도우 강제 한영 전환
     private forceWindowsIme(isKorean: boolean) {
         if (this.psProcess && this.psProcess.stdin) {
-            // 파워쉘 파이프라인에 강제 전환 명령 전송 (0.01초 컷)
             const cmd = isKorean ? '[IME]::SetKorean();\n' : '[IME]::SetEnglish();\n';
             this.psProcess.stdin.write(cmd);
         } else {
-            // 프로세스가 죽었을 때를 대비한 Fallback
             const psCommand = `
                 Add-Type -TypeDefinition '
                 using System;
@@ -450,23 +397,17 @@ export default class Fcitx5LatexPlugin extends Plugin {
         }
     }
 
- private switchToEnglish() {
+    private switchToEnglish() {
         if (isLinux) exec(this.settings.linuxEngCmd, () => {});
-        else if (isWin) this.forceWindowsIme(false); // 무조건 영어로 꽂기
+        else if (isWin) this.forceWindowsIme(false);
     }
 
-  private switchToKorean() {
+    private switchToKorean() {
         if (isLinux) exec(this.settings.linuxKorCmd, () => {});
-        else if (isWin) this.forceWindowsIme(true);  // 무조건 한글로 꽂기
+        else if (isWin) this.forceWindowsIme(true);
     }
 }
 
-// ==========================================
-// 설정 UI 탭 클래스
-// ==========================================
-// ==========================================
-// 설정 UI 탭 클래스 (영문판 - 글로벌 스토어 심사용)
-// ==========================================
 class Fcitx5LatexSettingTab extends PluginSettingTab {
     plugin: Fcitx5LatexPlugin;
 
@@ -481,18 +422,6 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
         containerEl.createEl('h2', { text: 'LaTeX Auto IME Switcher Settings' });
 
         new Setting(containerEl)
-            .setName('Math Recognition Engine')
-            .setDesc('Select how to detect math environments. (Syntax Tree recommended)')
-            .addDropdown(dropdown => dropdown
-                .addOption('syntaxTree', 'Syntax Tree (Accurate)')
-                .addOption('regex', 'Regex (Fast)')
-                .setValue(this.plugin.settings.engine)
-                .onChange(async (value: 'regex' | 'syntaxTree') => {
-                    this.plugin.settings.engine = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
             .setName('Auto-complete Dollar Sign')
             .setDesc('Automatically complete $ to $$ and move cursor inside.')
             .addToggle(toggle => toggle
@@ -502,9 +431,11 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+       
+ 
         new Setting(containerEl)
             .setName('Strict Boundary Detection')
-            .setDesc('Prevents boundary expansion bugs caused by Obsidian\'s internal parser. Enable if Korean input fails just outside math blocks.')
+            .setDesc('Enable if Korean input fails just outside math blocks.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.strictBoundary)
                 .onChange(async (value) => {
@@ -512,9 +443,30 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+
+// 🚀 (신규 인라인 Range 옵션 추가)
         new Setting(containerEl)
-            .setName('Regex Search Range')
-            .setDesc('If using Regex engine, set how many characters around the cursor to read. (Default: 3500)')
+            .setName('Inline Math ($) Scan Range')
+            .setDesc('인라인 수식($)의 띄어쓰기 오류를 교정하기 위해 스캔할 글자 수입니다. 정규식을 사용하므로 배터리/성능을 위해 500~1000 사이의 낮은 값을 권장합니다. (기본값: 800)')
+            .addText(text => text
+                .setPlaceholder('500')
+                .setValue(String(this.plugin.settings.inlineScanRange))
+                .onChange(async (value) => {
+                    const num = parseInt(value);
+                    if (!isNaN(num)) {
+                        this.plugin.settings.inlineScanRange = num;
+                        await this.plugin.saveSettings();
+                    }
+                }));
+
+
+
+
+
+
+        new Setting(containerEl)
+            .setName('Math Block Scan Range')
+            .setDesc('Characters to scan backward to detect $$ blocks. Higher values support longer equations but may slightly impact performance. (Default: 3500)')
             .addText(text => text
                 .setPlaceholder('3500')
                 .setValue(String(this.plugin.settings.regexRange))
@@ -530,9 +482,7 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Linux English Command')
-            .setDesc('Command executed when entering a math block (e.g., fcitx5-remote -s keyboard-us).')
             .addText(text => text
-                .setPlaceholder('fcitx5-remote -s keyboard-us')
                 .setValue(this.plugin.settings.linuxEngCmd)
                 .onChange(async (value) => {
                     this.plugin.settings.linuxEngCmd = value;
@@ -541,16 +491,16 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Linux Local Language Command')
-            .setDesc('Command executed when exiting a math block (e.g., fcitx5-remote -s hangul).')
             .addText(text => text
-                .setPlaceholder('fcitx5-remote -s hangul')
                 .setValue(this.plugin.settings.linuxKorCmd)
                 .onChange(async (value) => {
                     this.plugin.settings.linuxKorCmd = value;
                     await this.plugin.saveSettings();
                 }));
 
-        new Setting(containerEl)
+
+
+new Setting(containerEl)
             .setName('Windows IME Toggle Key Code (Legacy)')
             .setDesc('Virtual key code for IME toggle. Note: Windows now uses native imm32.dll API by default for zero-delay switching, making this fallback rarely used.')
             .addText(text => text
