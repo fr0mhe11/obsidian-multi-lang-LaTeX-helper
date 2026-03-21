@@ -265,6 +265,12 @@ const textToCursor = state.doc.sliceString(startPos, pos);
             if (isLeftMath && !isRightMath && leftName.includes("formatting-math-end")) return { isMath: false, inTextCmd: false };
             if (!isLeftMath && isRightMath && rightName.includes("formatting-math-begin")) return { isMath: false, inTextCmd: false };
             
+if (isLeftMath && isRightMath && leftName.includes("formatting-math-end") && rightName.includes("formatting-math-begin")) {
+                return { isMath: false, inTextCmd: false };
+            }
+
+
+
             const pChar = state.doc.sliceString(pos - 1, pos);
             const nChar = state.doc.sliceString(pos, pos + 1);
             if (pChar === '$' && nChar === '$') {
