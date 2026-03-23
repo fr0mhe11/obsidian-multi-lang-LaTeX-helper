@@ -1,90 +1,28 @@
-# Obsidian Sample Plugin
+# Obsidian Multi-Lang LaTeX Helper
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+A blazingly fast Obsidian plugin that automatically switches your Input Method Editor (IME) between English and your local language (Korean) when entering or exiting LaTeX math environments.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+수식(LaTeX)을 작성할 때마다 한/영 키를 눌러야 하는 번거로움을 완벽하게 없애주는 Obsidian 플러그인입니다. 수식 블록(`$`, `$$`) 진입 시 자동으로 영어로, 빠져나오면 다시 한글로 전환됩니다.
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+## ✨ Key Features & Optimizations
 
-## First time developing plugins?
+- **Zero-Delay Switching**: Windows(native `imm32.dll`)와 Linux(`fcitx5`) 환경에서 지연 없는 즉각적인 입력기 전환을 지원합니다.
+- 🚀 **Extreme V8 Engine Optimization**:
+  - 메모리 누수 및 가비지 컬렉션(GC)을 유발하는 무거운 `state.doc.toString()` 호출을 완전히 제거했습니다.
+  - 정규식 호이스팅(RegEx Hoisting)과 CodeMirror 6의 네이티브 `syntaxTree` 파싱을 활용하여, 대용량 노트에서도 타이핑 지연(Micro-stuttering)이 발생하지 않는 $O(1)$ ~ $O(\log N)$ 수준의 성능을 달성했습니다.
+- **Smart Context Awareness**: 코드 블록(Code blocks)과 프론트매터(Frontmatter) 내부의 `$` 기호를 무시하여 오작동을 방지합니다.
+- **Customizable Strictness**: 인라인 수식(`$ $`) 내부의 줄바꿈(Enter) 허용 여부를 옵션으로 제공하여 사용자 스타일에 맞는 완벽한 한/영 전환 타이밍을 설정할 수 있습니다.
 
-Quick starting guide for new plugin devs:
+## ⚙️ Settings
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+- **Auto-complete Dollar Sign**: `$` 입력 시 `$$`로 자동 완성하고 커서를 중앙으로 이동시킵니다.
+- **Allow Line Breaks in Inline Math ($)**: 인라인 수식 내 줄바꿈 허용 여부를 설정합니다. 끄면 속도가 더 빨라지고 엔터를 치는 순간 즉시 한글로 전환됩니다.
+- **Strict Boundary Detection**: 수식 블록 경계선에서의 한/영 전환 판정을 엄격하게 적용합니다.
+- **Math Block Scan Range**: 수식 감지를 위한 스캔 범위를 세밀하게 조정할 수 있습니다.
+- **OS-specific IME Commands**: Linux 유저를 위한 커스텀 `fcitx5` 전환 명령어를 지원합니다.
 
-## Releasing new releases
+## 🛠️ Installation (Manual)
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
-
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
-
-## Adding your plugin to the community plugin list
-
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
-
-## How to use
-
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
-
-## Manually installing the plugin
-
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
-
-## Improve code quality with eslint
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
-
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
-```
-
-If you have multiple URLs, you can also do:
-
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
-```
-
-## API Documentation
-
-See https://docs.obsidian.md
+1. Download the latest release (`main.js`, `manifest.json`, `styles.css`).
+2. Extract the files into your Obsidian vault's plugin folder: `YourVault/.obsidian/plugins/obsidian-multi-lang-LaTeX-helper/`
+3. Reload Obsidian and enable the plugin in Settings > Community Plugins.
