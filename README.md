@@ -21,6 +21,9 @@ A blazingly fast Obsidian plugin that automatically switches your Input Method E
 - **Math Block Scan Range**: 수식 감지를 위한 스캔 범위를 세밀하게 조정할 수 있습니다.
 - **OS-specific IME Commands**: Linux 유저를 위한 커스텀 `fcitx5` 전환 명령어를 지원합니다.
 
+
+## fcitx5 사용자를 위한 알림
+**전역 옵션** 에서 **첫번째 입력기와 현재 입력기의 임시 전환** 이 "왼쪽 쉬프트" 로 되어있는 경우가 있습니다. 이경우 수식 안에서 쉬프트 키를 누르면 입력언어가 바뀌는 문제가 있으니 해당 설정을 다른 키로 바꾸거나 비워주세요!
 ## 🛠️ Installation (Manual)
 
 1. Download the latest release (`main.js`, `manifest.json`, `styles.css`).
