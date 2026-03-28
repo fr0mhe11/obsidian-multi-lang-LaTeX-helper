@@ -29,8 +29,11 @@ A blazingly fast Obsidian plugin that automatically switches your Input Method E
 아직 공식 스토어 심사 중이라, BRAT 플러그인을 통해 미리 만나보실 수 있습니다.
 
 1.Obsidian 설정 -> 커뮤니티 플러그인 -> BRAT 설치 및 활성화
+
 2.BRAT 설정에서 'Add Beta plugin' 클릭
+
 3.아래 주소 복사해서 붙여넣기:
+
   https://github.com/fr0mhe11/obsidian-multi-lang-LaTeX-helper
 
 
