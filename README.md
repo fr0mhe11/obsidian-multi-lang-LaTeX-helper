@@ -26,6 +26,11 @@ A blazingly fast Obsidian plugin that automatically switches your Input Method E
 **전역 옵션** 에서 **첫번째 입력기와 현재 입력기의 임시 전환** 이 "왼쪽 쉬프트" 로 되어있는 경우가 있습니다. 이경우 수식 안에서 쉬프트 키를 누르면 입력언어가 바뀌는 문제가 있으니 해당 설정을 다른 키로 바꾸거나 비워주세요!
 ## 🛠️ Installation (Manual)
 
-1. Download the latest release (`main.js`, `manifest.json`, `styles.css`).
-2. Extract the files into your Obsidian vault's plugin folder: `YourVault/.obsidian/plugins/obsidian-multi-lang-LaTeX-helper/`
-3. Reload Obsidian and enable the plugin in Settings > Community Plugins.
+아직 공식 스토어 심사 중이라, BRAT 플러그인을 통해 미리 만나보실 수 있습니다.
+
+1.Obsidian 설정 -> 커뮤니티 플러그인 -> BRAT 설치 및 활성화
+2.BRAT 설정에서 'Add Beta plugin' 클릭
+3.아래 주소 복사해서 붙여넣기:
+  https://github.com/fr0mhe11/obsidian-multi-lang-LaTeX-helper
+
+
