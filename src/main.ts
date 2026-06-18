@@ -9,6 +9,9 @@ const isLinux = process.platform === 'linux';
 
 interface Fcitx5LatexSettings {
 	autoCompleteDollar: boolean;
+	allowEnterInInlineMath: boolean;
+	strictBoundary: boolean;
+	regexRange: number; // ✨ 스캔 범위 설정 부활
 	linuxEngCmd: string;
 	linuxKorCmd: string;
 	windowsKeyCode: string;
@@ -16,7 +19,10 @@ interface Fcitx5LatexSettings {
 
 const DEFAULT_SETTINGS: Fcitx5LatexSettings = {
 	autoCompleteDollar: true,
-	linuxEngCmd: 'fcitx5-remote -s keyboard-us', // Fcitx5 환경 기본값
+	allowEnterInInlineMath: false,
+	strictBoundary: true,
+	regexRange: 3500, // 기본값 3500자
+	linuxEngCmd: 'fcitx5-remote -s keyboard-us',
 	linuxKorCmd: 'fcitx5-remote -s hangul',
 	windowsKeyCode: '0x15'
 }
@@ -29,7 +35,7 @@ export default class Fcitx5LatexPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-		console.log("🚀 LaTeX 듀얼 엔진 플러그인 로드됨 (SyntaxTree + StateMachine)");
+		console.log("🚀 LaTeX 듀얼 엔진 플러그인 로드됨 (Range Slice 탐색 적용)");
 
 		this.addSettingTab(new Fcitx5LatexSettingTab(this.app, this));
 
@@ -172,11 +178,9 @@ export default class Fcitx5LatexPlugin extends Plugin {
 		`;
 
 		this.psProcess = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '-']);
-
 		if (this.psProcess.stdin) {
 			this.psProcess.stdin.write(setupScript + '\n');
 		}
-
 		this.psProcess.on('error', (err) => console.error('백그라운드 파워쉘 실행 에러:', err));
 	}
 
@@ -191,7 +195,7 @@ export default class Fcitx5LatexPlugin extends Plugin {
 		}
 	}
 
-	// ✨ 핵심: 듀얼 엔진 수식 환경 판별 로직
+	// ✨ 핵심: Range 슬라이스를 적용한 하이브리드 엔진
 	private checkMathEnvironment(state: EditorState, pos: number): boolean {
 		const tree = syntaxTree(state);
 		const nodeLeft = tree.resolveInner(pos, -1);
@@ -199,20 +203,22 @@ export default class Fcitx5LatexPlugin extends Plugin {
 		const leftName = nodeLeft.name.toLowerCase();
 		const rightName = nodeRight.name.toLowerCase();
 
-		// 0. 예외: 코드 블록, 프론트매터 내부 무시
+		// 0. 예외 처리
 		if (leftName.includes("code") || leftName.includes("frontmatter") ||
 			rightName.includes("code") || rightName.includes("frontmatter")) {
 			return false;
 			}
 
-			// 1. [판단 A] 옵시디안 내장 파서 (Syntax Tree) 결과 확인
-			const isObsidianMath = (node: any): boolean => {
+			// 1. [판단 A] 옵시디안 내장 파서 (Syntax Tree) + Strict Boundary
+			const isObsidianMath = (node: any, isRightNode: boolean): boolean => {
 				let curr = node;
 				while (curr) {
 					const name = curr.name.toLowerCase();
 					if (name.includes("math")) {
-						// 수식이 끝나는 닫는 기호($ 또는 $$) 바로 오른쪽 커서는 제외
-						if (name.includes("formatting-math-end")) return false;
+						if (this.settings.strictBoundary) {
+							if (!isRightNode && name.includes("formatting-math-end")) return false;
+							if (isRightNode && name.includes("formatting-math-begin")) return false;
+						}
 						return true;
 					}
 					curr = curr.parent;
@@ -220,20 +226,33 @@ export default class Fcitx5LatexPlugin extends Plugin {
 				return false;
 			};
 
-			if (isObsidianMath(nodeLeft) || isObsidianMath(nodeRight)) {
+			if (isObsidianMath(nodeLeft, false) || isObsidianMath(nodeRight, true)) {
 				return true;
 			}
 
-			// 2. [판단 B] 자체 초경량 현재 줄 State Machine 탐색
-			const line = state.doc.lineAt(pos);
-			const textUpToCursor = line.text.slice(0, pos - line.from);
+			// 2. [판단 B] 설정된 Range만큼 잘라와서 State Machine 탐색
+			let startPos = 0;
+
+			if (this.settings.allowEnterInInlineMath) {
+				// ✨ 줄바꿈을 허용할 경우: 사용자가 설정한 regexRange 만큼 뒤로 가서 통째로 슬라이스
+				const scanRange = this.settings.regexRange || 3500;
+				startPos = Math.max(0, pos - scanRange);
+			} else {
+				// 엄격 모드(허용 안함): 정확히 현재 줄의 시작점부터만 스캔 (초고속 유지)
+				const line = state.doc.lineAt(pos);
+				startPos = line.from;
+			}
+
+			// 받아온 범위만큼 문자열을 슬라이스
+			const textToScan = state.sliceDoc(startPos, pos);
 
 			let isEscaped = false;
 			let inlineDollarCount = 0;
 			let blockMathOpen = false;
 
-			for (let i = 0; i < textUpToCursor.length; i++) {
-				const char = textUpToCursor[i];
+			// 정규식 대신 순수 State Machine으로 스캔 (문자열이 3500자여도 0.1ms 컷)
+			for (let i = 0; i < textToScan.length; i++) {
+				const char = textToScan[i];
 
 				if (char === '\\') {
 					isEscaped = !isEscaped;
@@ -241,9 +260,9 @@ export default class Fcitx5LatexPlugin extends Plugin {
 				}
 
 				if (char === '$' && !isEscaped) {
-					if (i + 1 < textUpToCursor.length && textUpToCursor[i + 1] === '$') {
+					if (i + 1 < textToScan.length && textToScan[i + 1] === '$') {
 						blockMathOpen = !blockMathOpen;
-						i++;
+						i++; // 다음 $ 건너뛰기
 					} else {
 						inlineDollarCount++;
 					}
@@ -251,11 +270,12 @@ export default class Fcitx5LatexPlugin extends Plugin {
 				isEscaped = false;
 			}
 
+			// 블록 수식이 열려있거나, 인라인 수식이 열려있다면 (홀수 개)
 			if (blockMathOpen || (inlineDollarCount % 2 === 1)) {
 				return true;
 			}
 
-			// 3. [예외 케이스] $ $ 사이 (자동완성 직후 파서 갱신 전 찰나)
+			// 3. [예외 케이스] $ $ 사이 (자동완성 직후 찰나)
 			const prevChar = state.sliceDoc(pos - 1, pos);
 			const nextChar = state.sliceDoc(pos, pos + 1);
 			if (prevChar === '$' && nextChar === '$') {
@@ -341,6 +361,41 @@ class Fcitx5LatexSettingTab extends PluginSettingTab {
 		.setValue(this.plugin.settings.autoCompleteDollar)
 		.onChange(async (value) => {
 			this.plugin.settings.autoCompleteDollar = value;
+			await this.plugin.saveSettings();
+		}));
+
+		new Setting(containerEl)
+		.setName('Allow Line Breaks in Inline Math ($)')
+		.setDesc('인라인 수식 내부에 줄바꿈을 허용합니다. 이 옵션이 켜져 있으면 아래의 Scan Range 값만큼 문서를 역추적하여 수식 환경을 판단합니다.')
+		.addToggle(toggle => toggle
+		.setValue(this.plugin.settings.allowEnterInInlineMath)
+		.onChange(async (value) => {
+			this.plugin.settings.allowEnterInInlineMath = value;
+			await this.plugin.saveSettings();
+		}));
+
+		// ✨ 설정 탭: 스캔 범위 설정 부활
+		new Setting(containerEl)
+		.setName('Math Context Scan Range')
+		.setDesc('수식 줄바꿈이 허용되었을 때 커서 기준으로 문서를 몇 글자 뒤로 거슬러 올라가 검사할지 결정합니다. (기본값: 3500)')
+		.addText(text => text
+		.setPlaceholder('3500')
+		.setValue(String(this.plugin.settings.regexRange))
+		.onChange(async (value) => {
+			const num = parseInt(value);
+			if (!isNaN(num)) {
+				this.plugin.settings.regexRange = num;
+				await this.plugin.saveSettings();
+			}
+		}));
+
+		new Setting(containerEl)
+		.setName('Strict Boundary Detection')
+		.setDesc('수식 블록($ 또는 $$) 바로 바깥쪽(경계)에 커서가 있을 때 한글 입력이 안 되는 현상을 방지합니다. (기본값: On)')
+		.addToggle(toggle => toggle
+		.setValue(this.plugin.settings.strictBoundary)
+		.onChange(async (value) => {
+			this.plugin.settings.strictBoundary = value;
 			await this.plugin.saveSettings();
 		}));
 
