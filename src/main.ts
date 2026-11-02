@@ -83,14 +83,16 @@ export default class MultiLangLaTeXPlugin extends Plugin {
 
 					if (nextChar === "$") {
 						if (prevChar === "$") {
-							view.dispatch({
-								changes: { from: from - 1, to: from + 1, insert: "$$$$" },
-								selection: { anchor: from + 1 },
-							});
-							this.setMathModeActive();
-						} else {
-							view.dispatch({ selection: { anchor: from + 1 } });
+							if (this.checkMathEnvironment(state, from)) {
+								view.dispatch({
+									changes: { from: from - 1, to: from + 1, insert: "$$$$" },
+									selection: { anchor: from + 1 },
+								});
+								this.setMathModeActive();
+								return true;
+							}
 						}
+						view.dispatch({ selection: { anchor: from + 1 } });
 						return true;
 					}
 
@@ -114,6 +116,9 @@ export default class MultiLangLaTeXPlugin extends Plugin {
 					if (currentName.includes("code") || currentName.includes("frontmatter")) return false;
 
 					if (from === to && state.sliceDoc(from - 1, from + 1) === "$$") {
+						if (!this.checkMathEnvironment(state, from)) {
+							return false;
+						}
 						view.dispatch({
 							changes: { from: from - 1, to: from + 1, insert: "" },
 							selection: { anchor: from - 1 },
@@ -247,11 +252,6 @@ export default class MultiLangLaTeXPlugin extends Plugin {
 			return true;
 		}
 
-		// [엔진 3 선행 체크] 커서가 빈 수식($|$) 한가운데 있는 경우 O(1)로 즉시 반환
-		if (state.sliceDoc(pos - 1, pos) === "$" && state.sliceDoc(pos, pos + 1) === "$") {
-			return true;
-		}
-
 		// [엔진 2-A: 인라인 수식 검사] 인라인 수식($)은 현재 줄을 벗어날 수 없으므로 현재 줄만 O(1) 스캔
 		const line = state.doc.lineAt(pos);
 		const lineFrom = line.from;
@@ -265,16 +265,17 @@ export default class MultiLangLaTeXPlugin extends Plugin {
 					let bs = 0;
 					for (let b = k - 1; b >= 0 && curLine.charCodeAt(b) === 92; b--) bs++; // 92 is '\'
 					if ((bs & 1) === 0) {
-						if (k + 1 < curLine.length && curLine.charCodeAt(k + 1) === 36) {
+						const nodeAt = tree.resolveInner(lineFrom + k + 1, -1).name.toLowerCase();
+						// 수식 밖에서 시작하는 $$만 블록 수식으로 취급 (인라인 닫는 $와 다음 인라인 여는 $가 인접한 $A$$B$ 케이스 구분)
+						if (!isInlineOpen && k + 1 < curLine.length && curLine.charCodeAt(k + 1) === 36 && !nodeAt.includes("formatting-math-end")) {
 							k++; // $$ 는 블록 수식이므로 인라인에서는 2칸 스킵
-						} else {
-							const nodeAt = tree.resolveInner(lineFrom + k + 1, -1).name.toLowerCase();
-							if (!nodeAt.includes("code")) {
-								if (nodeAt.includes("formatting-math-end")) {
-									isInlineOpen = false;
-								} else {
-									isInlineOpen = !isInlineOpen;
-								}
+						} else if (!nodeAt.includes("code")) {
+							if (nodeAt.includes("formatting-math-end")) {
+								isInlineOpen = false;
+							} else if (nodeAt.includes("formatting-math-begin")) {
+								isInlineOpen = true;
+							} else {
+								isInlineOpen = !isInlineOpen;
 							}
 						}
 					}
@@ -312,6 +313,9 @@ export default class MultiLangLaTeXPlugin extends Plugin {
 				if ((bs & 1) === 0) {
 					if (nodeAt.includes("formatting-math-end")) {
 						isBlockOpen = false;
+					} else if (nodeAt.includes("formatting-math-begin")) {
+						isBlockOpen = true;
+						openBlockStart = recentStart + idx;
 					} else {
 						isBlockOpen = !isBlockOpen;
 						if (isBlockOpen) openBlockStart = recentStart + idx;

@@ -72,14 +72,16 @@ var S = class extends r.Plugin {
 							if (d === "\\") return !1;
 					if (f === "$") {
 						if (d === "$") {
-							s.dispatch({
-								changes: { from: n - 1, to: n + 1, insert: "$$$$" },
-								selection: { anchor: n + 1 }
-							});
-							this.setMathModeActive();
-						} else {
-							s.dispatch({ selection: { anchor: n + 1 } });
+							if (this.checkMathEnvironment(a, n)) {
+								s.dispatch({
+									changes: { from: n - 1, to: n + 1, insert: "$$$$" },
+									selection: { anchor: n + 1 }
+								});
+								this.setMathModeActive();
+								return !0;
+							}
 						}
+						s.dispatch({ selection: { anchor: n + 1 } });
 						return !0;
 					}
 					s.dispatch({
@@ -99,6 +101,7 @@ var S = class extends r.Plugin {
 					h = (0, x.syntaxTree)(a).resolveInner(n, -1).name.toLowerCase();
 					if (h.includes("code") || h.includes("frontmatter")) return !1;
 					if (n === c && a.sliceDoc(n - 1, n + 1) === "$$") {
+						if (!this.checkMathEnvironment(a, n)) return !1;
 						s.dispatch({
 							changes: { from: n - 1, to: n + 1, insert: "" },
 							selection: { anchor: n - 1 }
@@ -211,9 +214,6 @@ var S = class extends r.Plugin {
 
 		if (d(a, !1) || d(n, !0)) return !0;
 
-		// [엔진 3 선행 체크] 커서가 빈 수식($|$) 한가운데 있는 경우 O(1)로 즉시 반환
-		if (e.sliceDoc(t - 1, t) === "$" && e.sliceDoc(t, t + 1) === "$") return !0;
-
 		// [엔진 2-A: 인라인 수식 검사] 인라인 수식($)은 현재 줄을 벗어날 수 없으므로 현재 줄만 O(1) 스캔
 		let line = e.doc.lineAt(t),
 		lineFrom = line.from,
@@ -227,16 +227,16 @@ var S = class extends r.Plugin {
 					let bs = 0;
 					for (let b = k - 1; b >= 0 && curLine.charCodeAt(b) === 92; b--) bs++;
 					if ((bs & 1) === 0) {
-						if (k + 1 < curLine.length && curLine.charCodeAt(k + 1) === 36) {
+						let nodeAt = s.resolveInner(lineFrom + k + 1, -1).name.toLowerCase();
+						if (!isInlineOpen && k + 1 < curLine.length && curLine.charCodeAt(k + 1) === 36 && !nodeAt.includes("formatting-math-end")) {
 							k++; // $$ 는 블록 수식이므로 인라인에서는 2칸 스킵
-						} else {
-							let nodeAt = s.resolveInner(lineFrom + k + 1, -1).name.toLowerCase();
-							if (!nodeAt.includes("code")) {
-								if (nodeAt.includes("formatting-math-end")) {
-									isInlineOpen = !1;
-								} else {
-									isInlineOpen = !isInlineOpen;
-								}
+						} else if (!nodeAt.includes("code")) {
+							if (nodeAt.includes("formatting-math-end")) {
+								isInlineOpen = !1;
+							} else if (nodeAt.includes("formatting-math-begin")) {
+								isInlineOpen = !0;
+							} else {
+								isInlineOpen = !isInlineOpen;
 							}
 						}
 					}
@@ -274,6 +274,9 @@ var S = class extends r.Plugin {
 				if ((bs & 1) === 0) {
 					if (nodeAt.includes("formatting-math-end")) {
 						isBlockOpen = !1;
+					} else if (nodeAt.includes("formatting-math-begin")) {
+						isBlockOpen = !0;
+						openBlockStart = recentStart + idx;
 					} else {
 						isBlockOpen = !isBlockOpen;
 						if (isBlockOpen) openBlockStart = recentStart + idx;
